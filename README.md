@@ -1,8 +1,11 @@
-# O-Data-Center-System
+# iCloud Photo Archiver
 
-> 个人数据中心：iPhone 照片视频 → 自动分类 → 异地双备份 → 自动清理，全链路无人值守。
+> iPhone 照片视频 → iCloud → Mac Mini 自动分类 → 异地双备份 → 空间回收，全链路无人值守。
 
 拍了照片就忘掉它——你的 Mac Mini 会帮你整理、备份到 115 网盘和群晖 NAS，然后清理本地中转空间。
+
+**设计要点**：Shell 只做编排，所有判断逻辑都在独立可测的 Python 模块里；备份目标是配置驱动的，
+增删一个备份目的地不需要改代码。
 
 ---
 
@@ -19,35 +22,42 @@
 ## 项目结构
 
 ```
-O-Data-Center-System/
+icloud-photo-archiver/
 │
-├── modules/                            # 🧩 可独立运行的模块
+├── modules/                            # 🧩 完整的 Python 包，以 python -m 调用
 │   ├── export/
 │   │   ├── photo_export.py             #   核心：导出 + 五级分类
-│   │   └── verify_backup.py            #   备份完整性验证
+│   │   └── verify_backup.py            #   归档完整性验证（清理前的安全闸）
+│   ├── cleanup/
+│   │   ├── clean_staging.py            #   本地中转清理（带备份确认安全阀）
+│   │   └── icloud_report.py            #   iCloud/Photos 可清理报告
+│   ├── preflight/
+│   │   └── check_photos_access.py      #   Photos 库访问权限（TCC）检查
 │   ├── backup/
 │   │   ├── 115/backup_to_115.sh        #   rsync → 115（异地热备）
 │   │   └── nas/backup_to_nas.sh        #   WOL + rsync → NAS（本地冷备）
-│   ├── cleanup/                        #   本地中转清理（待迁入）
 │   ├── scheduler/
-│   │   ├── photo_backup_weekly.sh      #   周度主流水线
+│   │   ├── photo_backup_weekly.sh      #   周度主流水线（纯编排，零内联 Python）
 │   │   └── launchd/                    #   调度配置（2 个 job）
-│   └── utils/                          #   logger · notify · email · watchdog
+│   └── utils/                          #   共享地基
+│       ├── config.py                   #   配置读取（Python 侧）
+│       ├── manifest.py                 #   备份清单：目标标记 / 风险文件 / 幽灵条目
+│       ├── email_notify.py             #   SMTP 报告邮件
+│       ├── logger.sh · notify.sh       #   日志与 macOS 通知
+│       └── clouddrive_watchdog.sh      #   CloudDrive2 挂载健康自愈
 │
 ├── config/
-│   ├── config.env                      #   用户配置（gitignored）
+│   ├── load.sh                         #   配置装载（shell 侧唯一入口）
+│   ├── config.env.example              #   公用配置模板（路径、阈值、开关）
+│   ├── secrets.env.example             #   保密配置模板（邮箱、内网地址、SSH）
 │   └── device-models.json              #   设备型号 → 机主映射
 │
-├── steps/                              # 📚 分步操作手册
-│   ├── step-00-environment/            #   环境准备（一次性）
-│   ├── step-01-icloud-sync/            #   iCloud → Mac 同步
-│   ├── step-02-photo-export/           #   照片导出与五级分类 ⭐
-│   ├── step-03-backup-115/             #   备份至 115 网盘
-│   ├── step-04-backup-nas/             #   备份至群晖 NAS（冷备）
-│   └── step-06-scheduling/             #   全自动调度 (launchd)
-│
+├── steps/                              # 📚 分步操作手册（step-00 ~ step-06）
 └── .state/ · .logs/                    # 运行状态与日志（gitignored）
 ```
+
+**配置优先级**：环境变量 > `config.env` > `secrets.env` > 代码默认值。
+因此换目录做实验不必改文件：`BACKUP_ROOT=/tmp/x python -m modules.export.photo_export --dry-run`。
 
 ---
 
@@ -125,17 +135,24 @@ step-06-scheduling/      ← 全自动调度
 常用命令：
 
 ```bash
-# 配置
-vim config/config.env                  # 用户配置
-vim config/device-models.json          # 设备型号 → 机主（可选）
+# 配置：两份文件，代码里不硬编码任何环境相关值
+cp config/config.env.example config/config.env       # 公用：路径、阈值、开关
+cp config/secrets.env.example config/secrets.env     # 保密：邮箱、内网地址、SSH
 
-# 分模块测试
-python3.11 modules/export/photo_export.py --dry-run    # 预览导出
-bash modules/backup/115/backup_to_115.sh               # 测试 115 备份
-bash modules/backup/nas/backup_to_nas.sh --wol-only    # 测试 NAS 唤醒
+# 分模块运行 —— modules/ 是包，PYTHONPATH 指向项目根
+export PYTHONPATH="$PWD"
+python -m modules.export.photo_export --dry-run       # 预览导出
+python -m modules.cleanup.clean_staging --dry-run     # 预览清理
+python -m modules.export.verify_backup                # 验证归档完整性
+python -m modules.utils.manifest show                 # 查看备份清单
+
+# Shell 模块同样可单独跑
+bash modules/backup/115/backup_to_115.sh --dry-run
+bash modules/backup/nas/backup_to_nas.sh --wol-only   # 仅测试 WOL 唤醒
 
 # 完整流水线
-bash modules/scheduler/photo_backup_weekly.sh
+bash modules/scheduler/photo_backup_weekly.sh         # 正式执行
+bash modules/scheduler/photo_backup_weekly.sh --test  # 测试模式
 ```
 
 部署定时任务：
@@ -154,18 +171,49 @@ launchctl list | grep com.datacenter
 
 ---
 
-## 模块化说明
+## 模块化设计
 
-各模块完全独立，可单独运行、单独替换：
+三条约束贯穿整个代码库。
 
-| 模块 | 路径 | 独立性 |
-|------|------|--------|
-| 照片导出 | `modules/export/` | 可单独运行，不依赖备份模块 |
-| 115 备份 | `modules/backup/115/` | 可单独运行，不依赖 NAS 模块 |
-| NAS 备份 | `modules/backup/nas/` | 可单独运行，不依赖 115 模块 |
-| 调度 | `modules/scheduler/` | 编排以上模块 |
+**1. Shell 只做编排，判断逻辑全在 Python 模块里。**
 
-**替换示例**：如果将来改用 rclone 同步到 115，只需替换 `modules/backup/115/backup_to_115.sh`，其他模块不受影响。
+主干 `photo_backup_weekly.sh` 里没有一行内联 Python。早期版本用 heredoc 把 Python 塞进 shell，
+既无法单独测试也无法复用；现在它只负责按顺序调用模块、收集输出、决定后续步骤走不走。
+
+**2. 模块之间用机器可读的结果行通信。**
+
+每个模块在输出末尾打印一行 `[RESULT] k=v k=v`，编排层用取值函数提取，
+而不是靠脆弱的 grep 去抓中文日志。这样模块的日志措辞可以随便改，契约不变。
+
+| 模块 | 结果行 |
+|------|--------|
+| `photo_export` | `[RESULT] exported=N skipped=N failed=N size_bytes=N` |
+| `clean_staging` | `[RESULT] cleaned=N kept=N failed=N` |
+| `verify_backup` | `[RESULT] verified=N passed=N failed=N blocked=bool` |
+
+**3. 备份目标是配置驱动的。**
+
+`BACKUP_TARGETS="115,nas"` 决定备份到哪几个目的地，每个目的地从 `REMOTE_<目标名大写>_DIR` 读路径；
+清单里的标记字段也按目标生成（`backed_up_115`、`backed_up_nas`）。
+**新增一个备份目的地 = 改配置，不用改任何 Python 代码。**
+
+**独立性**：每个模块都能单独运行、调试、替换。例如将来改用 rclone 挂载 115，
+只需替换 `modules/backup/115/backup_to_115.sh`，其他模块不受影响。
+
+---
+
+## 安全设计
+
+这一节是本项目最花心思的地方——**清理功能一旦判错就是永久丢照片**。
+
+- **清理前先验证**：Step 0 用 `os.stat` 逐一比对即将被清理的老文件在远端的大小，
+  缺一个就 FATAL，阻塞整条流水线的删除动作。保留期内的文件不验证（本次 rsync 会传上去）。
+- **安全阀**：只有当一个月份目录下**每一个文件**都确认已备份，才允许清理它。
+  宁可留一堆没用的本地文件，也不能删掉唯一一份还没上云的照片。
+- **绝不用硬删除兜底**：默认移入废纸篓；移动失败就保留原目录并计入 `failed`，不退化成 `rm -rf`。
+- **失败不冒充成功**：rsync 失败就不打「已备份」标记——否则等于给清理逻辑发了假通行证。
+- **空配置即中止**：`CLEANUP_REQUIRE_TARGETS` 为空时直接拒绝执行，
+  因为「没有任何目标需要确认」等价于「无条件删除」。
 
 ---
 
@@ -182,4 +230,4 @@ launchctl list | grep com.datacenter
 
 ## 许可
 
-个人项目，自用为主。
+[MIT](./LICENSE)
