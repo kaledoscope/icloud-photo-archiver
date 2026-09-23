@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.datacenter.photo-backup-weekly</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <!-- ⚠️ 部署前将 your_user 替换为你的实际用户名 -->
+        <string>/Users/your_user/Workspace/Projects/O-Data-Center-System/modules/scheduler/photo_backup_weekly.sh</string>
+    </array>
+
+    <!-- 每周一 + 周四凌晨 3:00 执行 -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Weekday</key>
+            <integer>1</integer>
+            <key>Hour</key>
+            <integer>3</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key>
+            <integer>4</integer>
+            <key>Hour</key>
+            <integer>3</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+    </array>
+
+    <!-- 环境变量
+         注意：这里【不设】BACKUP_ROOT。
+         环境变量优先级高于 config/config.env，在这里再设一份会让
+         「改了 config 却不生效」。路径一律由 config/config.env 提供。 -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+        <key>HOME</key>
+        <!-- ⚠️ 部署前替换为你的 home 目录 -->
+        <string>/Users/your_user</string>
+    </dict>
+
+    <!-- 日志输出
+         ⚠️ launchd 要求绝对路径，无法从 config 读取。
+         改 config/config.env 的 BACKUP_ROOT 时，这两行要同步改。 -->
+    <key>StandardOutPath</key>
+    <string>/Users/your_user/PhotoBackup/.logs/launchd_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/your_user/PhotoBackup/.logs/launchd_stderr.log</string>
+
+    <!-- 仅在日历触发时运行，不在加载时运行 -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

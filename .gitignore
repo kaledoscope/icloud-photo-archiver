@@ -1,0 +1,26 @@
+# Runtime state
+.state/
+
+# Runtime logs
+.logs/
+
+# macOS
+.DS_Store
+._*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# 配置（按环境填写，含个人路径）
+config/config.env
+
+# 敏感配置（邮箱、授权码、内网地址）—— 绝不外传
+config/secrets.env

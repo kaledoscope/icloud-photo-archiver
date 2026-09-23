@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.datacenter.clouddrive-watchdog</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/your_user/Workspace/Projects/O-Data-Center-System/modules/utils/clouddrive_watchdog.sh</string>
+        <string>--quiet</string>
+    </array>
+
+    <!-- 开机自启：仅 RunAtLoad，不做定期检查 -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- 环境变量 -->
+    <!-- 环境变量
+         注意：这里【不设】BACKUP_ROOT —— 见 photo-backup-weekly.plist 同名注释。
+         路径一律由 config/config.env 提供。 -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+        <key>HOME</key>
+        <string>/Users/your_user</string>
+    </dict>
+
+    <!-- 脚本退出后不杀子进程（CloudDrive2 需要脱离 launchd 存活） -->
+    <key>AbandonProcessGroup</key>
+    <true/>
+
+    <!-- 日志输出 -->
+    <key>StandardOutPath</key>
+    <string>/Users/your_user/PhotoBackup/.logs/launchd_watchdog_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/your_user/PhotoBackup/.logs/launchd_watchdog_stderr.log</string>
+</dict>
+</plist>

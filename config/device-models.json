@@ -1,0 +1,17 @@
+{
+  "_description": "设备型号 → 拥有者/文件夹名映射。用于按机型分类备份。",
+  "_instructions": "每个条目格式: { 原始EXIF名称: { owner, folder_name, color } }。文件夹名用于生成目录结构，不能包含空格和特殊字符。",
+  "_how_to_install": "复制成 config/device-models.json 再改。那个文件已被 .gitignore 忽略，不会外传 —— 它记录的是你家真实的设备清单。",
+  "iPhone 15 Pro": {
+    "owner": "示例-机主",
+    "folder_name": "iPhone_15_Pro",
+    "color": ""
+  },
+  "Pixel 8": {
+    "owner": "示例-另一台设备",
+    "folder_name": "Pixel_8",
+    "color": ""
+  },
+  "_unknown_folder_name": "Unknown_Device",
+  "_note": "如果你的设备型号不在上面，照片会自动归类到 Unknown_Device 文件夹（可用 _unknown_folder_name 改名）。你可以随时添加新设备条目。"
+}
