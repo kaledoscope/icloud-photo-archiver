@@ -108,6 +108,20 @@ _FILE_VALUES = _expand(
 )
 
 
+def reindex() -> int:
+    """重新读取配置文件，刷新模块级缓存。
+
+    配置在 import 时就缓存下来了（_FILE_VALUES）。长期驻留的进程
+    （网页后端）改了 config/ 下的文件后必须调这个，否则读到的还是旧值。
+    返回本次加载到的配置项数量。
+    """
+    global _FILE_VALUES
+    _FILE_VALUES = _expand(
+        {k: v for f in _CONFIG_FILES for k, v in _parse_file(CONFIG_DIR / f).items()}
+    )
+    return len(_FILE_VALUES)
+
+
 def get(key: str, default=None):
     """读取配置项（字符串）。环境变量优先于配置文件。"""
     if key in os.environ:

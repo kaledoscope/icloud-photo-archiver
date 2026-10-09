@@ -1,0 +1,11 @@
+# 命令行主流程的依赖
+#
+# 只有「从 Photos.app 导出」这一步需要外部库；分类引擎
+# (modules/classify/) 零依赖，仅用 macOS 自带的 sips 与 ffprobe。
+# 也就是说：不装这个文件，文件夹分类功能照样能用。
+#
+# 安装:
+#     python3.11 -m venv .venv
+#     .venv/bin/pip install -r requirements.txt
+
+osxphotos>=0.70

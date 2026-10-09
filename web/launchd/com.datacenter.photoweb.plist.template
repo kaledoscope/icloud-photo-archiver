@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  照片归档分类器 —— 常驻服务
+
+  这是模板，不是能直接用的 plist：里面的 __PROJECT_ROOT__ / __PYTHON_BIN__
+  是占位符。deploy.sh 的 install 子命令会把它们替换成本机的真实路径，
+  渲染到 ~/Library/LaunchAgents/ 下再加载。
+
+  不直接提交渲染好的 plist，是因为它必须写死绝对路径，而绝对路径里
+  带着用户名——那属于个人环境信息，不该进公开仓库。
+
+  （XML 注释里不能出现连续两个减号，所以这里不写命令行参数原文。）
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.datacenter.photoweb</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON_BIN__</string>
+        <string>-m</string>
+        <string>uvicorn</string>
+        <string>app:app</string>
+        <string>--app-dir</string>
+        <string>__PROJECT_ROOT__/web/backend</string>
+        <!-- 只绑回环地址：服务没有登录、没有鉴权，绝不能暴露到局域网 -->
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8787</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_ROOT__</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__PROJECT_ROOT__/web/.state/logs/photoweb.log</string>
+    <key>StandardErrorPath</key>
+    <string>__PROJECT_ROOT__/web/.state/logs/photoweb.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <!--
+          launchd 默认 PATH 只有 /usr/bin:/bin:/usr/sbin:/sbin，看不到
+          Homebrew 的 /opt/homebrew/bin。ffprobe 就装在那里，缺了它所有
+          视频会静默降级成 Unknown_Device。
+          modules/classify/metadata.py 里已有兜底查找，这里再给一份 PATH，
+          是为了让将来新增的其他外部命令也能被找到。
+        -->
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

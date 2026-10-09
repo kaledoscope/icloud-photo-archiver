@@ -15,6 +15,13 @@ __pycache__/
 .venv/
 venv/
 
+# 写回配置时留下的上一版副本
+*.bak
+
+# 前端
+node_modules/
+web/frontend/dist/
+
 # IDE
 .vscode/
 .idea/
@@ -24,3 +31,7 @@ config/config.env
 
 # 敏感配置（邮箱、授权码、内网地址）—— 绝不外传
 config/secrets.env
+
+# 设备清单（记录家里真实有哪些机器，属于个人环境信息）
+# 要提交的那份是 config/device-models.json.example
+config/device-models.json

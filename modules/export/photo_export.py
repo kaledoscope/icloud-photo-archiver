@@ -26,7 +26,6 @@ photo_export.py — 从 Photos.app 导出照片视频，按 设备型号/年/月
 import os
 import sys
 import json
-import hashlib
 import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -41,8 +40,14 @@ except ImportError:
 
 
 # ===== 配置（统一来自 config/，不要在此硬编码环境相关值）=====
-from modules.utils.config import PROJECT_ROOT, get, get_int, get_path, require_path
+from modules.utils.config import get, get_int, require_path
+from modules.utils.files import compute_sha256, human_size
 from modules.utils.manifest import Manifest, empty_flags
+
+# 分类规则来自共用引擎：Photos 导出的照片与硬盘上的老素材走同一套规则，
+# 避免「五级路径模板」和「型号映射」在两处各存一份、各改各的。
+from modules.classify import device as device_mod
+from modules.classify.planner import build_relative_path, dedupe_relative
 
 BACKUP_ROOT = require_path("BACKUP_ROOT")
 
@@ -62,10 +67,6 @@ DEFAULT_DEVICE_MODEL = get("DEFAULT_DEVICE_MODEL", "")
 
 # 导出窗口（月）
 EXPORT_WINDOW_MONTHS = get_int("EXPORT_WINDOW_MONTHS", 3)
-
-# 设备型号映射文件（未配置则用项目内置表）
-DEVICE_MODELS_PATH = get_path("DEVICE_MODELS_PATH",
-                              PROJECT_ROOT / "config" / "device-models.json")
 
 
 def log(msg: str):
@@ -131,25 +132,6 @@ def save_state(export_count: int, duration_sec: float):
     }, indent=2, ensure_ascii=False))
 
 
-def load_device_models() -> dict:
-    """加载设备型号映射配置"""
-    if DEVICE_MODELS_PATH.exists():
-        try:
-            return json.loads(DEVICE_MODELS_PATH.read_text())
-        except (json.JSONDecodeError, ValueError):
-            log(f"⚠️  设备型号文件损坏: {DEVICE_MODELS_PATH}")
-    return {}
-
-
-def compute_sha256(filepath: Path) -> str:
-    """计算文件 SHA256 哈希"""
-    h = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):  # 64KB 块
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def classify_source(photo) -> str:
     """
     判定照片来源: personal / family-shared
@@ -171,12 +153,12 @@ def classify_device(photo) -> str:
     """
     从 EXIF 提取设备型号，返回规范化的文件夹名称
 
-    例如:
-    - "iPhone 15 Pro" → "iPhone_15_Pro"
-    - "iPhone 14 Pro Max" → "Pixel_8"
-    - 未知 → "Unknown_Device"
+    映射与规范化规则统一由 modules/classify/device.py 提供，
+    与「任意文件夹分类」共用同一套，不在此另存一份。
 
-    同时参考 device-models.json 中的 folder_name 映射
+    与那个模块唯一的语义差别：Photos 库里没有相机信息的条目
+    （基本是机主手机存的网图）按 DEFAULT_DEVICE_MODEL 归入主力机型；
+    硬盘上来源不明的老素材则归 Unknown_Device，不冒充某人拍的。
     """
     try:
         exif = photo.exif_info
@@ -191,30 +173,13 @@ def classify_device(photo) -> str:
 
         if not camera_model:
             # 使用配置的默认设备（匹配当前设备的非相机来源文件）
-            camera_model = DEFAULT_DEVICE_MODEL if DEFAULT_DEVICE_MODEL else "Unknown_Device"
+            camera_model = DEFAULT_DEVICE_MODEL
 
-        # 检查是否有映射配置
-        device_models = load_device_models()
-        if camera_model in device_models:
-            return device_models[camera_model].get("folder_name", sanitize_model(camera_model))
-
-        return sanitize_model(camera_model)
+        return device_mod.resolve_folder_name(camera_model)
 
     except Exception as e:
         log(f"⚠️  获取设备型号失败: {e}")
-        return DEFAULT_DEVICE_MODEL if DEFAULT_DEVICE_MODEL else "Unknown_Device"
-
-
-def sanitize_model(model: str) -> str:
-    """规范化设备型号名称：空格→下划线，去掉特殊字符"""
-    import re
-    # 替换空格和特殊分隔符为下划线
-    sanitized = re.sub(r'[\s/\\,()]+', '_', model)
-    # 去掉多个连续下划线
-    sanitized = re.sub(r'_+', '_', sanitized)
-    # 去掉首尾下划线
-    sanitized = sanitized.strip('_')
-    return sanitized if sanitized else "Unknown_Device"
+        return DEFAULT_DEVICE_MODEL if DEFAULT_DEVICE_MODEL else device_mod.unknown_folder_name()
 
 
 def classify_media_type(photo) -> str:
@@ -230,7 +195,7 @@ def classify_asset(photo) -> Tuple[str, str, str]:
 
     返回: (source, device_model, media_type)
     - source: "personal" | "family-shared"
-    - device_model: "iPhone_15_Pro" | "Pixel_8" | ...
+    - device_model: 规范化后的机型名，如 "iPhone_15_Pro" | "Pixel_8" | ...
     - media_type: "photos" | "videos"
     """
     source = classify_source(photo)
@@ -252,9 +217,8 @@ def get_export_path(photo, source: str, device_model: str, media_type: str) -> P
     - 第4层: 来源 = personal / family-shared
     - 第5层: 媒体类型 = photos / videos
 
-    示例:
-    - iPhone_15_Pro/2026/06/personal/photos/IMG_1234.HEIC     ← 设备 A 拍的照片
-    - Pixel_8/2026/06/family-shared/videos/IMG_5678.MOV ← 共享相簿里的视频
+    路径模板与重名规则都由 modules/classify/planner.py 提供——全项目一份实现，
+    「任意文件夹分类」走的是同一套，不会两处规则各改各的。
     """
     # 使用拍摄日期分类——目录结构反映"何时拍摄"，而非"何时导入"
     # 若拍摄日期不可用则回退到入库日期，再不行用当前时间
@@ -262,32 +226,16 @@ def get_export_path(photo, source: str, device_model: str, media_type: str) -> P
     if not dt:
         dt = datetime.now()
 
-    year = dt.strftime("%Y")
-    month = dt.strftime("%m")
-    filename = photo.original_filename
-
-    # 新结构: 设备优先 → 时间 → 来源 → 媒体类型
-    target_dir = BACKUP_ROOT / device_model / year / month / source / media_type
-    target_path = target_dir / filename
-
-    # 同名冲突处理：追加拍摄时间戳
-    if target_path.exists():
-        stem = Path(filename).stem
-        suffix = Path(filename).suffix
-        ts = dt.strftime("%Y%m%d_%H%M%S")
-        filename = f"{stem}_{ts}{suffix}"
-        target_path = target_dir / filename
-
-    return target_path
-
-
-def format_size(size_bytes: int) -> str:
-    """格式化文件大小"""
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if size_bytes < 1024:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes /= 1024
-    return f"{size_bytes:.1f} PB"
+    rel = build_relative_path(
+        device=device_model,
+        taken_at=dt,
+        source=source,
+        media_type=media_type,
+        filename=photo.original_filename,
+    )
+    # 同名不覆盖：追加拍摄时间戳，仍冲突再加递增序号
+    rel = dedupe_relative(rel, dt, lambda r: (BACKUP_ROOT / r).exists())
+    return BACKUP_ROOT / rel
 
 
 def export_photos(full_mode: bool = False, dry_run: bool = False, verbose: bool = False) -> int:
@@ -422,9 +370,9 @@ def export_photos(full_mode: bool = False, dry_run: bool = False, verbose: bool 
 
                 # 进度汇报
                 if verbose:
-                    log(f"  ✅ {photo.original_filename} → {target_path} ({format_size(file_size)})")
+                    log(f"  ✅ {photo.original_filename} → {target_path} ({human_size(file_size)})")
                 elif exported_count % 100 == 0:
-                    log(f"已导出 {exported_count} 个文件 ({format_size(total_size)})...")
+                    log(f"已导出 {exported_count} 个文件 ({human_size(total_size)})...")
             else:
                 log(f"  ⚠️  导出返回空: {photo.original_filename}")
 
@@ -455,7 +403,7 @@ def export_photos(full_mode: bool = False, dry_run: bool = False, verbose: bool 
     log(f"新增导出: {exported_count} 个文件")
     log(f"跳过(已存在): {skipped_count} 个文件")
     log(f"失败: {error_count} 个文件")
-    log(f"总大小: {format_size(total_size)}")
+    log(f"总大小: {human_size(total_size)}")
     log(f"耗时: {duration:.1f}s")
     log("")
     log("按设备型号统计:")

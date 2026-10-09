@@ -44,12 +44,12 @@
 如果按年/月在最外层:
   打开备份 → 2026/ → 06/ → personal/ → 终于看到 iPhone_15_Pro/ → 点进去
   另一台: 打开备份 → 2026/ → 06/ → personal/ → Pixel_8/ → ...
-  ↑ 每个人都要翻遍所有年份才能找到自己的照片，反人类
+  ↑ 每台设备都要翻遍所有年份才能找到自己的照片，反人类
 
 如果按设备在最外层:
   打开备份 → iPhone_15_Pro/ → 2026/06/ → personal/photos/
   另一台: 打开备份 → Pixel_8/ → 2026/06/ → personal/photos/
-  ↑ 一人一个文件夹，直截了当
+  ↑ 一台设备一个文件夹，直截了当
 ```
 
 ### 2.2.2 分类层级
@@ -82,7 +82,7 @@
 │   │       └── ...
 │   └── ...
 │
-├── Pixel_8/                ← 设备 B
+├── Pixel_8/                          ← 设备 B
 │   └── 2026/
 │       └── 06/
 │           ├── personal/
@@ -108,12 +108,12 @@
 ```
 /Volumes/CloudDrive/115/PhotoBackup/
 ├── iPhone_15_Pro/          ← 分享这个文件夹给 A（链接或权限）
-├── Pixel_8/      ← 分享这个文件夹给 B
+├── Pixel_8/                ← 分享这个文件夹给 B
 ├── iPhone_13/              ← 分享这个文件夹给 C
 └── Unknown_Device/         ← 共享的/无法识别的
 ```
 
-每个人只看到自己的文件夹，隐私清晰，不会误看别人的照片。
+每人只拿到自己那份文件夹，隐私清晰，不会误看别人的照片。
 
 ### 2.2.5 「来源」判定逻辑
 
@@ -161,30 +161,32 @@ def classify_device(photo) -> str:
 
 **设备型号映射** (`config/device-models.json`)：
 
+从模板复制一份再改：
+
+```bash
+cp config/device-models.json.example config/device-models.json
+```
+
+内容形如（下面全是示例值，换成你自己的设备）：
+
 ```json
 {
   "iPhone 15 Pro": {
-    "owner": "机主",
+    "owner": "示例-机主",
     "folder_name": "iPhone_15_Pro",
-    "color": "蓝色"
-  },
-  "iPhone 14 Pro Max": {
-    "owner": "另一台",
-    "folder_name": "Pixel_8",
-    "color": "紫色"
-  },
-  "iPhone 13": {
-    "owner": "设备 C",
-    "folder_name": "iPhone_13",
     "color": ""
   },
-  "iPad Pro (12.9-inch) (6th generation)": {
-    "owner": "家庭共享",
-    "folder_name": "iPad_Pro_12.9_6th",
+  "Pixel 8": {
+    "owner": "示例-另一台设备",
+    "folder_name": "Pixel_8",
     "color": ""
   }
 }
 ```
+
+> `device-models.json` 记录的是**你家真实有哪些机器**，所以它已被 `.gitignore` 忽略，
+> 不会随仓库外传。仓库里提交的是不带个人信息的 `device-models.json.example`。
+> 全仓库只有 `config/*.example` 是给外人看的模板。
 
 ### 2.2.7 「媒体类型」判定逻辑
 
@@ -310,20 +312,20 @@ BACKUP_ROOT=/custom/path python3.11 modules/export/photo_export.py
 
 ## 2.6 设备型号分类 —— 使用场景
 
-### 场景 1：按家人浏览
+### 场景 1：按设备浏览
 
 ```
-"我想看家人上周拍的照片"
+"我想看某台机器上周拍的照片"
 → 打开 Pixel_8/2026/06/personal/photos/
-→ 全是她拍的照片，没有混合其他人的
+→ 全是这台机器拍的，没有混合其他设备的
 ```
 
 ### 场景 2：迁移到新手机
 
 ```
-"我要换 iPhone 17 了，导出我拍的所有照片"
+"我要换新手机了，导出旧机器拍的所有照片"
 → rsync -av /Volumes/Data/PhotoBackup/iPhone_15_Pro/ /new_drive/
-→ 只复制我拍的，一行命令搞定
+→ 只复制那台机器的，一行命令搞定
 ```
 
 ### 场景 3：存储问责

@@ -28,6 +28,12 @@ icloud-photo-archiver/
 │   ├── export/
 │   │   ├── photo_export.py             #   核心：导出 + 五级分类
 │   │   └── verify_backup.py            #   归档完整性验证（清理前的安全闸）
+│   ├── classify/                       #   🆕 分类引擎：判定素材去哪（不依赖 Photos 库）
+│   │   ├── metadata.py                 #     读文件本身：sips(图) + ffprobe(视频)
+│   │   ├── device.py                   #     机型 → 归档文件夹名
+│   │   ├── planner.py                  #     五级路径构建 + 冲突处理
+│   │   ├── scan.py                     #     CLI：扫描目录 → 分类计划（只读）
+│   │   └── apply.py                    #     CLI：按计划复制（源文件只读）
 │   ├── cleanup/
 │   │   ├── clean_staging.py            #   本地中转清理（带备份确认安全阀）
 │   │   └── icloud_report.py            #   iCloud/Photos 可清理报告
@@ -50,7 +56,14 @@ icloud-photo-archiver/
 │   ├── load.sh                         #   配置装载（shell 侧唯一入口）
 │   ├── config.env.example              #   公用配置模板（路径、阈值、开关）
 │   ├── secrets.env.example             #   保密配置模板（邮箱、内网地址、SSH）
-│   └── device-models.json              #   设备型号 → 机主映射
+│   ├── device-models.json.example      #   设备型号映射模板
+│   └── device-models.json              #   实际使用的那份（含你家设备清单，gitignored）
+│
+├── web/                                # 🆕 图形界面（删掉它，命令行系统照常工作）
+│   ├── backend/                        #   FastAPI：任务 / SSE / 计划分页
+│   ├── frontend/                       #   Svelte 5 + Vite
+│   ├── launchd/                        #   常驻自启模板（绑 127.0.0.1）
+│   └── deploy.sh · dev.sh              #   构建 / 安装 / 卸载 / 开发
 │
 ├── steps/                              # 📚 分步操作手册（step-00 ~ step-06）
 └── .state/ · .logs/                    # 运行状态与日志（gitignored）
@@ -92,22 +105,52 @@ PhotoBackup/
 **设备型号即人员分类**：
 
 ```
-iPhone_15_Pro/2026/06/personal/photos/      ← 设备 A 拍的照片
-Pixel_8/2026/06/personal/photos/  ← 设备 B 拍的照片
+iPhone_15_Pro/2026/06/personal/photos/      ← A 手机拍的照片
+Pixel_8/2026/06/personal/photos/            ← B 手机拍的照片
 iPhone_13/2026/06/family-shared/videos/     ← 共享相簿里的视频
 Unknown_Device/2026/06/personal/photos/     ← 无法识别设备
 ```
 
-分类依据是 **EXIF 相机型号**，映射表在 `config/device-models.json` —— 不限于 Apple 设备，任何相机型号都能登记归类，未登记的按型号原样归档。
+分类依据是 **EXIF 相机型号**，映射表在 `config/device-models.json` —— 不限于 Apple 设备，
+任何相机型号都能登记归类，未登记的按型号原样归档。
 
-**115 网盘视角**：一人一个顶层文件夹，可直接按人分享：
+**115 网盘视角**：一台设备一个顶层文件夹，可直接按人分享：
 
 ```
 /Volumes/CloudDrive/PhotoBackup/
 ├── iPhone_15_Pro/          ← 分享给 A
-├── Pixel_8/      ← 分享给 B
-└── iPhone_13/              ← 分享给 C
+├── Pixel_8/                ← 分享给 B
+└── iPhone_13/              ← 家庭共享
 ```
+
+---
+
+## 文件夹分类器 + 图形界面 🆕
+
+上面那套五级规则，现在也能用在 **Photos 库之外的老素材**上 —— 多年换机累积、
+散落在普通文件夹里的照片视频。
+
+```bash
+# 命令行
+export PYTHONPATH="$PWD"
+python -m modules.classify.scan  --input ~/Pictures/old --output ~/Classified --plan-out /tmp/plan.json
+python -m modules.classify.apply --plan /tmp/plan.json
+
+# 图形界面
+web/deploy.sh --run            # 然后浏览器开 http://127.0.0.1:8787
+```
+
+两条路走的是**同一套规则** —— `modules/classify/` 是唯一的真相源，
+网页后端只是起子进程调 CLI 并解析 `[RESULT]` 行。
+
+**取与判分离**：`export/` 负责从 Photos.app **取**素材（依赖 osxphotos），
+`classify/` 只负责判定素材**去哪**（零依赖，只看文件本身）。因此两批素材能共用规则。
+
+> ⚠️ 分类是**手动触发**的两步操作：先扫描出计划供审阅，确认后才复制。
+> **源目录全程只读** —— 只往你指定的输出目录复制，不移动、不改名、不删除。
+> 网页界面里没有、也不会有任何删除入口。
+
+细节见 [`modules/classify/README.md`](modules/classify/README.md) 与 [`web/README.md`](web/README.md)。
 
 ---
 
@@ -135,9 +178,15 @@ step-06-scheduling/      ← 全自动调度
 常用命令：
 
 ```bash
-# 配置：两份文件，代码里不硬编码任何环境相关值
-cp config/config.env.example config/config.env       # 公用：路径、阈值、开关
-cp config/secrets.env.example config/secrets.env     # 保密：邮箱、内网地址、SSH
+# 配置：三份文件，代码里不硬编码任何环境相关值
+cp config/config.env.example config/config.env                 # 公用：路径、阈值、开关
+cp config/secrets.env.example config/secrets.env               # 保密：邮箱、内网地址、SSH
+cp config/device-models.json.example config/device-models.json # 设备：EXIF 型号 → 机主
+
+# 后两份 + device-models.json 都已被 .gitignore 忽略 —— 它们记录的是你的个人环境
+
+# 依赖：分类引擎零依赖，requirements.txt 只有 osxphotos（导出用）
+python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 # 分模块运行 —— modules/ 是包，PYTHONPATH 指向项目根
 export PYTHONPATH="$PWD"
@@ -225,6 +274,8 @@ launchctl list | grep com.datacenter
 - **NAS 冷备**: wakeonlan + rsync + SSH
 - **调度**: macOS launchd
 - **通知**: osascript (原生通知中心) + SMTP 邮件
+- **元数据读取**: `sips` + `ffprobe` (macOS / Homebrew，**零新增 Python 依赖**)
+- **图形界面**: FastAPI + uvicorn + Svelte 5 + Vite
 
 ---
 

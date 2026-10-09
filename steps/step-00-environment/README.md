@@ -313,9 +313,9 @@ echo "BACKUP_ROOT=$BACKUP_ROOT"
 │           └── family-shared/
 │               ├── photos/
 │               └── videos/
-├── Pixel_8/                  # 设备 B
+├── Pixel_8/                             # 设备 B
 │   └── YYYY/MM/...
-├── iPhone_13/                          # 设备 C
+├── iPhone_13/                           # 设备 C
 │   └── YYYY/MM/...
 ├── Unknown_Device/                     # 无法识别设备（截图等）
 │   └── ...
